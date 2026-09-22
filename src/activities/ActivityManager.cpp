@@ -23,6 +23,7 @@
 #include "reader/ReaderActivity.h"
 #include "settings/OpdsServerListActivity.h"
 #include "settings/SettingsActivity.h"
+#include "study/StudyActivity.h"
 #include "util/BmpViewerActivity.h"
 #include "util/FrontlightPanelActivity.h"
 #include "util/FullScreenMessageActivity.h"
@@ -245,6 +246,15 @@ void ActivityManager::goToUsbDrive() {
 
 void ActivityManager::goToSettings() { replaceActivity(std::make_unique<SettingsActivity>(renderer, mappedInput)); }
 
+void ActivityManager::goToStudy() {
+  auto activity = makeUniqueNoThrow<StudyActivity>(renderer, mappedInput);
+  if (!activity) {
+    LOG_ERR("ACT", "OOM: study activity");
+    return;
+  }
+  replaceActivity(std::move(activity));
+}
+
 void ActivityManager::goToFileBrowser(std::string path) {
   replaceActivity(std::make_unique<FileBrowserActivity>(renderer, mappedInput, std::move(path)));
 }
@@ -312,6 +322,8 @@ void ActivityManager::goHome(HomeMenuItem initialMenuItem, bool cleanInitialRefr
       initialMenuItem = HomeMenuItem::OPDS_BROWSER;
     } else if (activityName == "CrossPointWebServer") {
       initialMenuItem = HomeMenuItem::FILE_TRANSFER;
+    } else if (activityName == "Study") {
+      initialMenuItem = HomeMenuItem::STUDY;
     } else if (activityName == "Settings") {
       initialMenuItem = HomeMenuItem::SETTINGS_MENU;
     }
@@ -341,7 +353,14 @@ void ActivityManager::popActivity() {
   pendingAction = PendingAction::Pop;
 }
 
-bool ActivityManager::preventAutoSleep() const { return currentActivity && currentActivity->preventAutoSleep(); }
+bool ActivityManager::preventAutoSleep() const {
+  // A pushed dialog (e.g. a "Stop timer?" confirmation) must not let auto-sleep
+  // tear down the activity underneath it just because the dialog itself doesn't
+  // override this. Mirrors isReaderActivity()'s stack-aware check below.
+  return (currentActivity && currentActivity->preventAutoSleep()) ||
+         std::any_of(stackActivities.begin(), stackActivities.end(),
+                     [](const auto& activity) { return activity->preventAutoSleep(); });
+}
 
 bool ActivityManager::requiresExclusiveStorageLoop() const {
   return currentActivity && currentActivity->requiresExclusiveStorageLoop();
